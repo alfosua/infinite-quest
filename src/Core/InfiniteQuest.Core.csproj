@@ -1,12 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
   <PropertyGroup>
     <AssemblyName>CatalinaLabs.InfiniteQuest.Core</AssemblyName>
     <RootNamespace>CatalinaLabs.InfiniteQuest.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MonoGame.Extended" Version="5.5.0" />
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*">
       <PrivateAssets>All</PrivateAssets>
     </PackageReference>
