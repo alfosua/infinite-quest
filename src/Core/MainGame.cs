@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -17,7 +19,7 @@ public class MainGame : Game
     private SpriteFont font;
     private OrthographicCamera camera;
     private MouseListener mouseController;
-    private ChunkData chunk = new ChunkData(16);
+    private World? world;
     private Point focusedCoords;
     private bool seeded = false;
 
@@ -40,37 +42,61 @@ public class MainGame : Game
         });
         mouseController.MouseMoved += (_, e) =>
         {
+            if (!IsActive)
+            {
+                return;
+            }
+
             focusedCoords = CalculateCellCoordsFromScreen(e.Position, camera);
         };
         mouseController.MouseDrag += (_, e) =>
         {
+            if (!IsActive)
+            {
+                return;
+            }
+
             camera.Position -= e.DistanceMoved / camera.Zoom;
         };
         mouseController.MouseWheelMoved += (_, e) =>
         {
+            if (!IsActive)
+            {
+                return;
+            }
+
            camera.Zoom += e.ScrollWheelDelta * 0.001f; 
         };
         mouseController.MouseClicked += (_, e) =>
         {
+            if (!IsActive)
+            {
+                return;
+            }
+
             if (!seeded && e.Button == MonoGame.Extended.Input.MouseButton.Left)
             {
-                chunk = ChunkGenerator.Generate(new()
+                world = new World(new()
                 {
-                    Length = 16,
-                    SafeSpot = focusedCoords,
-                    SafeSpotRadius = 1,
-                    DangerCount = 40,
+                    Seed = FastRandom.Shared.Next(),
+                    Origin = focusedCoords,
+                    SafeRadius = 1,
                 });
                 seeded = true;
             }
 
+            if (world is null)
+            {
+                return;
+            }
+
             if (e.Button == MonoGame.Extended.Input.MouseButton.Left)
             {
-                RevealFrom(focusedCoords, chunk);
+                world.RevealFrom(focusedCoords);
             }
             else
             {
-                var targetCell = chunk.GetCell(focusedCoords);
+                var targetCell = world.GetCell(focusedCoords);
 
                 if (targetCell.IsRevealed)
                 {
@@ -81,98 +107,18 @@ public class MainGame : Game
                     ? CellStatus.Hidden
                     : CellStatus.Protected;
 
-                chunk.SetCell(focusedCoords, targetCell.WithStatus(nextStatus));
+                world.SetCell(focusedCoords, targetCell.WithStatus(nextStatus));
             }
         };
 
         base.Initialize();
     }
 
-    private void RevealFrom(Point targetCoords, ChunkData chunk)
-    {
-        var targetCell = chunk.GetCell(targetCoords);
-        
-        if (targetCell.IsRevealed || targetCell.IsProtected)
-        {
-            return;
-        }
-
-        if (targetCell is { ProximityCount: > 0 } or { IsDangerous: true })
-        {
-            chunk.SetCell(targetCoords, targetCell.WithStatus(CellStatus.Revealed));
-            return;
-        }
-
-        var stack = new Stack<Point>();
-        stack.Push(targetCoords);
-        
-        while (stack.Count > 0)
-        {
-            var coords = stack.Pop();
-
-            if (chunk.GetCell(coords) is { IsRevealed: true })
-            {
-                continue;
-            }
-            
-            int leftX = coords.X;
-            while (leftX > 0 && chunk.GetCell(leftX - 1, coords.Y) is { ProximityCount: 0, IsRevealed: false })
-            {
-                leftX--;
-            }
-            
-            int rightX = coords.X;
-            while (rightX < chunk.Length - 1 && chunk.GetCell(rightX + 1, coords.Y) is { ProximityCount: 0, IsRevealed: false })
-            {
-                rightX++;
-            }
-
-            for (int x = Math.Max(0, leftX - 1); x <= Math.Min(chunk.Length - 1, rightX + 1); x++)
-            {
-                chunk.Reveal(x, coords.Y);
-            }
-
-            ScanLineSeeds(leftX, rightX, coords.Y - 1, stack, chunk);
-            ScanLineSeeds(leftX, rightX, coords.Y + 1, stack, chunk);
-        }
-    }
-
-    private void ScanLineSeeds(int leftX, int rightX, int y, Stack<Point> stack, ChunkData chunk)
-    {
-        if (y < 0 || y >= chunk.Length)
-        {
-            return;
-        }
-
-        bool added = false;
-        for (int x = Math.Max(0, leftX - 1); x <= Math.Min(chunk.Length - 1, rightX + 1); x++)
-        {
-            var cell = chunk.GetCell(x, y);
-
-            if (cell.ProximityCount == 0 )
-            {
-                if (!added)
-                {
-                    stack.Push(new Point(x, y));
-                    added = true;
-                }
-            }
-            else
-            {
-                if (cell.IsHidden)
-                {
-                    chunk.Reveal(x, y);
-                }
-                added = false;
-            }
-        }
-    }
-
     private Point CalculateCellCoordsFromScreen(Point screenPosition, OrthographicCamera camera)
     {
         var worldPosition = camera.ScreenToWorld(screenPosition.ToVector2());
-        var coordX = (int)Math.Clamp(MathF.Floor(worldPosition.X / TileSize), 0, chunk.Length - 1);
-        var coordY = (int)Math.Clamp(MathF.Floor(worldPosition.Y / TileSize), 0, chunk.Length - 1);
+        var coordX = (int)MathF.Floor(worldPosition.X / TileSize);
+        var coordY = (int)MathF.Floor(worldPosition.Y / TileSize);
         var targetCell = new Point(coordX, coordY);
         return targetCell;
     }
@@ -194,42 +140,13 @@ public class MainGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Color.CornflowerBlue);
+        GraphicsDevice.Clear(Color.Gray);
 
         var matrix = camera.GetViewMatrix();
-        
+
         spriteBatch.Begin(transformMatrix: matrix);
-
-        for (int i = 0; i < chunk.Length; i++)
-        {
-            for (int j = 0; j < chunk.Length; j++)
-            {
-                var cell = chunk.GetCell(j, i);
-                var cellRect = new RectangleF(j * TileSize, i * TileSize, TileSize, TileSize);
-                
-                var cellColor = cell switch
-                {
-                    { IsHidden: true } => Color.Gray,
-                    { IsProtected: true } => Color.Yellow,
-                    { Content: CellContent.Trap } => Color.Red,
-                    { Content: CellContent.Bomb } => Color.DarkRed,
-                    { Content: CellContent.Nuke } => Color.Green,
-                    { Content: CellContent.Coin } => Color.Gold,
-                    { Content: CellContent.Chest } => Color.Brown,
-                    { Content: CellContent.Scroll } => Color.Beige,
-                    { Content: CellContent.Portal } => Color.Purple,
-                    _ => Color.Silver,
-                };
-
-                spriteBatch.FillRectangle(cellRect, cellColor);
-                spriteBatch.DrawRectangle(cellRect, Color.Black);
-
-                if (cell.IsRevealed && cell.ProximityCount > 0)
-                {
-                    spriteBatch.DrawString(font, cell.ProximityCount.ToString(), new Vector2(cellRect.X, cellRect.Y), Color.Black);
-                }
-            }
-        }
+        
+        DrawWorld();
 
         spriteBatch.DrawRectangle(focusedCoords.X * TileSize, focusedCoords.Y * TileSize, TileSize, TileSize, Color.White, thickness: 2);
 
@@ -237,4 +154,66 @@ public class MainGame : Game
 
         base.Draw(gameTime);
     }
+
+    private void DrawWorld()
+    {
+        if (world is null)
+        {
+            return;
+        }
+
+        var chunksToDraw = CollectionsMarshal.AsSpan(world.Chunks.ToList());
+        foreach (var (key, chunk) in chunksToDraw)
+        {
+            var offset = new Point(key.X * TileSize * ChunkData.Length, key.Y * TileSize * ChunkData.Length);
+
+            for (int i = 0; i < ChunkData.Length; i++)
+            {
+                for (int j = 0; j < ChunkData.Length; j++)
+                {
+                    var cell = chunk.GetCell(new Point(j, i));
+                    var cellRect = new RectangleF(offset.X + j * TileSize, offset.Y + i * TileSize, TileSize, TileSize);
+
+                    var cellColor = cell switch
+                    {
+                        { IsHidden: true } => Color.Gray,
+                        { IsProtected: true } => Color.Yellow,
+                        { Content: CellContent.Trap } => Color.Red,
+                        { Content: CellContent.Bomb } => Color.DarkRed,
+                        { Content: CellContent.Nuke } => Color.Green,
+                        { Content: CellContent.Coin } => Color.Gold,
+                        { Content: CellContent.Chest } => Color.Brown,
+                        { Content: CellContent.Scroll } => Color.Beige,
+                        { Content: CellContent.Portal } => Color.Purple,
+                        _ => Color.Silver,
+                    };
+
+                    spriteBatch.FillRectangle(cellRect, cellColor);
+                    spriteBatch.DrawRectangle(cellRect, Color.Black);
+
+                    if (cell.IsRevealed && cell.ProximityCount > 0)
+                    {
+                        var color = cell.ProximityCount switch
+                        {
+                            1 => Color.Blue,
+                            2 => Color.Green,
+                            3 => Color.Red,
+                            4 => Color.Purple,
+                            5 => Color.Maroon,
+                            6 => Color.Cyan,
+                            7 => Color.Black,
+                            8 => Color.Gray,
+                            _ => Color.Black,
+                        };
+                        var badge = cell.ProximityCount.ToString();
+                        var textSize = font.MeasureString(badge);
+                        var badgeX = cellRect.X + cellRect.Width / 2 - textSize.X / 2;
+                        var badgeY = cellRect.Y + cellRect.Height / 2 - textSize.Y / 2;
+                        spriteBatch.DrawString(font, badge, new Vector2(badgeX, badgeY), color);
+                    }
+                }
+            }
+        }
+    }
+
 }

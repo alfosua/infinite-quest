@@ -10,7 +10,7 @@ public readonly struct CellData : IEquatable<CellData>
     private const byte ProximityCountMask = 0b_01111_0_00; 
     private const byte ContentMask =        0b_11111_0_00;
 
-    public byte Raw { get; }
+    public readonly byte Raw;
 
     public static CellData Empty { get; } = default;
 
@@ -29,11 +29,11 @@ public readonly struct CellData : IEquatable<CellData>
 
     public bool IsVoid => Status == CellStatus.Void;
 
-    public bool HasContent => ((Raw >> 2) & 1) == 1;
+    public bool HasContent => (Raw & HasContentMask) != 0;
 
     public CellContent Content => HasContent ? (CellContent)((Raw & ContentMask) >> 3) : CellContent.None;
 
-    public bool IsDangerous => HasContent && Content is >= CellContent.Trap and <= CellContent.Nuke;
+    public bool IsDangerous => HasContent && Content.IsDangerous;
 
     public int ProximityCount => !HasContent ? (Raw & ProximityCountMask) >> 3 : 0;
 
@@ -92,12 +92,22 @@ public enum CellContent : byte
 {
     None = 0,
     // Dangers
+    MinDanger = Trap,
     Trap = 1,
     Bomb = 2,
     Nuke = 3,
+    MaxDanger = Nuke,
     // Collectibles
     Coin = 4,
     Chest = 5,
     Scroll = 6,
     Portal = 7,
+}
+
+public static class CellContentExtensions
+{
+    extension(CellContent c)
+    {
+        public bool IsDangerous => c is >= CellContent.MinDanger and <= CellContent.MaxDanger;
+    }
 }

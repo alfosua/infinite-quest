@@ -8,13 +8,13 @@ public static class ChunkGenerator
 {
     public static ChunkData Generate(ChunkGenerationInput input)
     {
-        var chunk = new ChunkData(input.Length);
+        var chunk = new ChunkData();
 
         int dangerLeft = input.DangerCount;
         while (dangerLeft > 0)
         {
-            var x = FastRandom.Shared.Next() % chunk.Length;
-            var y = FastRandom.Shared.Next() % chunk.Length;
+            var x = FastRandom.Shared.Next() % ChunkData.Length;
+            var y = FastRandom.Shared.Next() % ChunkData.Length;
             var targetCoords = new Point(x, y);
 
             if (targetCoords == input.SafeSpot)
@@ -50,7 +50,7 @@ public static class ChunkGenerator
             {
                 for (int sy = targetCoords.Y - 1; sy <= targetCoords.Y + 1; sy++)
                 {
-                    if (sx < 0 || sx >= chunk.Length || sy < 0 || sy >= chunk.Length)
+                    if (sx < 0 || sx >= ChunkData.Length || sy < 0 || sy >= ChunkData.Length)
                     {
                         continue;
                     }

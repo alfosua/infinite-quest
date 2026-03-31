@@ -1,47 +1,43 @@
-using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Xna.Framework;
 
 namespace CatalinaLabs.InfiniteQuest.Core;
 
-public readonly struct ChunkData
+public struct ChunkData
 {
-    public readonly int Length;
+    public const int Length = 8;
 
-    private readonly CellData[] Cells;
-
-    public ChunkData(int length)
+    [InlineArray(Length*Length)]
+    public struct CellArray
     {
-        Length = length;
-        Cells = ArrayPool<CellData>.Shared.Rent(length*length);
+        private byte _e0;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int GetCellIndexByCoords(int x, int y) => y * Length + x;
+    private CellArray Cells;
 
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref CellData GetCellRef(int x, int y)
+    private static int CalcCoordsAsIndex(int x, int y)
     {
-        return ref Cells[GetCellIndexByCoords(x, y)];
+        Debug.Assert(x >= 0 && x < Length && y >= 0 && y < Length, "coords out of bounds");
+
+        return y * Length + x;
     }
 
-    public CellData GetCell(int x, int y) => Cells[GetCellIndexByCoords(x, y)];
+    public readonly CellData GetCell(int x, int y) => new(Cells[CalcCoordsAsIndex(x, y)]);
 
-    public CellData GetCell(Point p) => GetCell(p.X, p.Y);
+    public readonly CellData GetCell(Point p) => GetCell(p.X, p.Y);
 
     public void SetCell(int x, int y, CellData cell)
     {
-        ref CellData target = ref GetCellRef(x, y);
-        target = cell;
+        Cells[CalcCoordsAsIndex(x, y)] = cell.Raw;
     }
 
     public void SetCell(Point p, CellData cell) => SetCell(p.X, p.Y, cell);
 
     public void Reveal(int x, int y)
     {
-        ref CellData target = ref GetCellRef(x, y);
-        target = target.WithStatus(CellStatus.Revealed);
+        var cell = GetCell(x, y);
+        SetCell(x, y, cell.WithStatus(CellStatus.Revealed));
     }
 
     public void Reveal(Point p) => Reveal(p.X, p.Y);
