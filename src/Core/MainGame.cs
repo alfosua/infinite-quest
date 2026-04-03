@@ -22,12 +22,16 @@ public class MainGame : Game
     private World? world;
     private Point focusedCoords;
     private bool seeded = false;
+    private Texture2D tileMap;
+    private Color screenColor = new Color(89,70,134);
 
     public MainGame()
     {
         graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
+        graphics.SynchronizeWithVerticalRetrace = false;
+        this.IsFixedTimeStep = false;
     }
 
     protected override void Initialize()
@@ -65,7 +69,7 @@ public class MainGame : Game
                 return;
             }
 
-           camera.Zoom += e.ScrollWheelDelta * 0.001f; 
+            camera.Zoom += e.ScrollWheelDelta * 0.001f;
         };
         mouseController.MouseClicked += (_, e) =>
         {
@@ -126,6 +130,7 @@ public class MainGame : Game
     protected override void LoadContent()
     {
         font = Content.Load<SpriteFont>("HudFont");
+        tileMap = Content.Load<Texture2D>("fonts_k");
     }
 
     protected override void Update(GameTime gameTime)
@@ -135,20 +140,31 @@ public class MainGame : Game
 
         mouseController.Update(gameTime);
 
+
         base.Update(gameTime);
     }
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Color.Gray);
+        GraphicsDevice.Clear(screenColor);
 
         var matrix = camera.GetViewMatrix();
+        var fpsText = (1 / gameTime.ElapsedGameTime.TotalSeconds).ToString();
 
-        spriteBatch.Begin(transformMatrix: matrix);
-        
+        spriteBatch.Begin(
+            SpriteSortMode.Deferred,
+            BlendState.AlphaBlend,
+            SamplerState.PointClamp,
+            null,
+            null,
+            null,
+            matrix);
+
         DrawWorld();
 
         spriteBatch.DrawRectangle(focusedCoords.X * TileSize, focusedCoords.Y * TileSize, TileSize, TileSize, Color.White, thickness: 2);
+        spriteBatch.DrawString(font, fpsText, camera.Center, Color.White,
+        0, Vector2.Zero, 1 / camera.Zoom, SpriteEffects.None, 1f);
 
         spriteBatch.End();
 
@@ -157,63 +173,78 @@ public class MainGame : Game
 
     private void DrawWorld()
     {
-        if (world is null)
-        {
-            return;
-        }
+        if (world is null) return;
 
-        var chunksToDraw = CollectionsMarshal.AsSpan(world.Chunks.ToList());
-        foreach (var (key, chunk) in chunksToDraw)
-        {
-            var offset = new Point(key.X * TileSize * ChunkData.Length, key.Y * TileSize * ChunkData.Length);
+        var viewRect = camera.BoundingRectangle;
+        int chunkSize = TileSize * ChunkData.Length;
 
-            for (int i = 0; i < ChunkData.Length; i++)
+        int minChunkX = (int)MathF.Floor(viewRect.Left / chunkSize);
+        int maxChunkX = (int)MathF.Ceiling(viewRect.Right / chunkSize);
+        int minChunkY = (int)MathF.Floor(viewRect.Top / chunkSize);
+        int maxChunkY = (int)MathF.Ceiling(viewRect.Bottom / chunkSize);
+
+        int halfTile = TileSize / 2;
+
+        for (int cy = minChunkY; cy <= maxChunkY; cy++)
+        {
+            for (int cx = minChunkX; cx <= maxChunkX; cx++)
             {
-                for (int j = 0; j < ChunkData.Length; j++)
+                if (!world.Chunks.TryGetValue(new Point(cx, cy), out var chunk)) continue;
+
+                int startX = cx * chunkSize;
+                int startY = cy * chunkSize;
+
+                int currentY = startY;
+
+                for (int i = 0; i < ChunkData.Length; i++)
                 {
-                    var cell = chunk.GetCell(new Point(j, i));
-                    var cellRect = new RectangleF(offset.X + j * TileSize, offset.Y + i * TileSize, TileSize, TileSize);
+                    int currentX = startX;
 
-                    var cellColor = cell switch
+                    for (int j = 0; j < ChunkData.Length; j++)
                     {
-                        { IsHidden: true } => Color.Gray,
-                        { IsProtected: true } => Color.Yellow,
-                        { Content: CellContent.Trap } => Color.Red,
-                        { Content: CellContent.Bomb } => Color.DarkRed,
-                        { Content: CellContent.Nuke } => Color.Green,
-                        { Content: CellContent.Coin } => Color.Gold,
-                        { Content: CellContent.Chest } => Color.Brown,
-                        { Content: CellContent.Scroll } => Color.Beige,
-                        { Content: CellContent.Portal } => Color.Purple,
-                        _ => Color.Silver,
-                    };
+                        var cell = chunk.GetCell(j, i);
+                        
+                        var cellRect = new Rectangle(currentX, currentY, TileSize, TileSize);
 
-                    spriteBatch.FillRectangle(cellRect, cellColor);
-                    spriteBatch.DrawRectangle(cellRect, Color.Black);
+                        //numeros magicos jeje :p
+                        spriteBatch.Draw(tileMap, cellRect, 
+                            new Rectangle((int)cell.Status * TileSize, 10, TileSize, TileSize), 
+                            Color.White);
 
-                    if (cell.IsRevealed && cell.ProximityCount > 0)
-                    {
-                        var color = cell.ProximityCount switch
+                        if (cell.IsRevealed)
                         {
-                            1 => Color.Blue,
-                            2 => Color.Green,
-                            3 => Color.Red,
-                            4 => Color.Purple,
-                            5 => Color.Maroon,
-                            6 => Color.Cyan,
-                            7 => Color.Black,
-                            8 => Color.Gray,
-                            _ => Color.Black,
-                        };
-                        var badge = cell.ProximityCount.ToString();
-                        var textSize = font.MeasureString(badge);
-                        var badgeX = cellRect.X + cellRect.Width / 2 - textSize.X / 2;
-                        var badgeY = cellRect.Y + cellRect.Height / 2 - textSize.Y / 2;
-                        spriteBatch.DrawString(font, badge, new Vector2(badgeX, badgeY), color);
+                            spriteBatch.Draw(tileMap, cellRect,
+                                new Rectangle((int)cell.Content * TileSize, 42, TileSize, TileSize),
+                                Color.White);
+
+                                
+                            if (cell.ProximityCount > 0)
+                            {   
+                                var color = cell.ProximityCount switch
+                                {
+                                    1 => Color.Blue,
+                                    2 => Color.Green,
+                                    3 => Color.Red,
+                                    4 => Color.Purple,
+                                    5 => Color.Maroon,
+                                    6 => Color.Cyan,
+                                    7 => Color.Black,
+                                    8 => Color.Gray,
+                                    _ => Color.Black,
+                                };
+                                int badgeX = currentX + halfTile - 4;
+                                int badgeY = currentY + halfTile - 5;
+
+                                spriteBatch.Draw(tileMap, new Vector2(badgeX, badgeY),
+                                    new Rectangle(cell.ProximityCount * 9, 0, 8, 10),
+                                    color);
+                            }
+                        }
+                        currentX += TileSize;
                     }
+                    currentY += TileSize;
                 }
             }
         }
     }
-
 }
